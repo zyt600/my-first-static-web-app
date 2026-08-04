@@ -1,0 +1,57 @@
+name: Update ATFV official holdings mirror
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "atfv-mirror/update.py"
+      - ".github/workflows/update-atfv-mirror.yml"
+  schedule:
+    # 13:15 America/Los_Angeles during daylight time and standard time.
+    # The updater is idempotent, so the extra run exits without a commit.
+    - cron: "15 20 * * 1-5"
+    - cron: "15 21 * * 1-5"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: atfv-official-holdings-mirror
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install parser dependency
+        run: python -m pip install --disable-pip-version-check pypdf==5.9.0
+
+      - name: Download and validate Alger official holdings
+        run: python atfv-mirror/update.py
+
+      - name: Commit verified mirror update
+        shell: bash
+        run: |
+          if git diff --quiet -- atfv-mirror; then
+            echo "No official holdings change."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add atfv-mirror/latest.pdf \
+                  atfv-mirror/latest.csv \
+                  atfv-mirror/latest.json \
+                  atfv-mirror/archive/
+          effective_date=$(python -c 'import json; print(json.load(open("atfv-mirror/latest.json"))["effective_date"])')
+          git commit -m "Update ATFV official holdings for ${effective_date}"
+          git push
